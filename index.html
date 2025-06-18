@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP协议服务 - 大模型上下文协议</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>MCP协议服务</h1>
+            <p class="subtitle">大模型上下文协议实现 - Node.js后端</p>
+        </header>
+
+        <div class="main-content">
+            <div class="card control-panel">
+                <h2>会话控制</h2>
+
+                <div class="session-controls">
+                    <button id="newSessionBtn" class="btn">新建会话</button>
+                    <button id="clearSessionBtn" class="btn btn-warning">清除会话</button>
+                </div>
+
+                <div class="session-info">
+                    <p>当前会话ID: <span id="sessionId">未创建</span></p>
+                    <p>连接ID: <span id="connectionId">未连接</span></p>
+                </div>
+
+                <div class="context-editor">
+                    <h3>上下文设置</h3>
+                    <textarea id="contextInput" placeholder='{"language": "zh-CN", "tone": "professional"}'></textarea>
+                    <button id="updateContextBtn" class="btn">更新上下文</button>
+                </div>
+
+                <div class="connection-status">
+                    <h3>连接状态</h3>
+                    <p>Socket.IO: <span id="wsStatus">未连接</span></p>
+                </div>
+
+            </div>
+            <div class="card">
+                <h2>MCP协议交互</h2>
+
+                <div class="chat-container">
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="message assistant-message">
+                            欢迎使用MCP协议服务！请开始对话或创建一个新的会话。
+                        </div>
+                    </div>
+
+                    <div class="typing-indicator" id="typingIndicator">
+                        <div class="typing-dots">
+                            <div class="dot"></div>
+                            <div class="dot"></div>
+                            <div class="dot"></div>
+                        </div>
+                    </div>
+
+                    <div class="chat-input">
+                        <input type="text" id="messageInput" placeholder="输入消息..." autocomplete="off">
+                        <button id="sendMessageBtn" class="btn">发送</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card protocol-info">
+            <h2>MCP协议详情</h2>
+            <p>MCP(大模型上下文协议)是一种用于管理和维护与大模型交互的上下文状态的标准协议。</p>
+
+            <div class="protocol-details">
+                <p>请求示例:</p>
+                <pre>{
+  "session_id": "sess_123456",
+  "message": "解释量子计算",
+  "context": {
+    "language": "zh-CN",
+    "tone": "professional"
+  }
+}</pre>
+
+                <p>响应示例 (流式):</p>
+                <pre>data: {"content": "量子计算", ...}
+data: {"content": "是一种利用", ...}
+data: {"content": "量子力学原理的计算方式", ...}</pre>
+            </div>
+        </div>
+
+        <footer>
+            <p>MCP协议服务 &copy; 2023 | 基于Node.js和Redis实现</p>
+        </footer>
+    </div>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // 元素引用
+            const sessionIdEl = document.getElementById('sessionId');
+            const chatMessagesEl = document.getElementById('chatMessages');
+            const messageInputEl = document.getElementById('messageInput');
+            const sendMessageBtn = document.getElementById('sendMessageBtn');
+            const newSessionBtn = document.getElementById('newSessionBtn');
+            const clearSessionBtn = document.getElementById('clearSessionBtn');
+            const contextInputEl = document.getElementById('contextInput');
+            const updateContextBtn = document.getElementById('updateContextBtn');
+            const wsStatusEl = document.getElementById('wsStatus');
+            const typingIndicatorEl = document.getElementById('typingIndicator');
+
+            let currentSessionId = null;
+            let socket = null;
+
+            // 初始化 Socket.IO 连接
+            function initSocketIO() {
+                if (socket) {
+                    socket.disconnect();
+                }
+
+                // 创建 Socket.IO 连接
+                socket = io({
+                    reconnection: true,
+                    reconnectionAttempts: Infinity,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 5000,
+                    timeout: 20000,
+                    transports: ['websocket']
+                });
+
+                // 连接成功
+                socket.on('connect', () => {
+                    console.log('Socket.IO 连接已建立');
+                    wsStatusEl.textContent = '已连接';
+                    wsStatusEl.style.color = '#4cc9f0';
+                    addMessage('系统', 'Socket.IO 连接已建立', 'assistant');
+                });
+
+                // 连接错误
+                socket.on('connect_error', (error) => {
+                    console.error('Socket.IO 连接错误:', error);
+                    wsStatusEl.textContent = `错误: ${error.message}`;
+                    wsStatusEl.style.color = '#f72585';
+
+                    let errorMsg = 'Socket.IO 连接错误';
+                    if (error.message.includes('ECONNREFUSED')) {
+                        errorMsg = '无法连接到服务器，请确保服务正在运行';
+                    } else if (error.message.includes('xhr poll error')) {
+                        errorMsg = '服务器拒绝连接，请检查端口和防火墙设置';
+                    }
+
+                    addMessage('系统', errorMsg, 'assistant');
+                });
+
+                // 连接断开
+                socket.on('disconnect', (reason) => {
+                    console.log(`Socket.IO 断开连接: ${reason}`);
+                    wsStatusEl.textContent = '未连接';
+                    wsStatusEl.style.color = '#f72585';
+
+                    if (reason === 'io server disconnect') {
+                        // 服务器端主动断开，需要手动重连
+                        socket.connect();
+                    }
+
+                    const reconnectDelay = 5000; // 5秒后重连
+                    addMessage('系统', `Socket.IO 连接已断开 (${reason})，将在 ${reconnectDelay / 1000} 秒后尝试重新连接...`, 'assistant');
+                });
+
+                // 重新连接尝试
+                socket.on('reconnect_attempt', (attempt) => {
+                    console.log(`尝试重新连接 (${attempt})`);
+                    wsStatusEl.textContent = `重连中 (${attempt})`;
+                    wsStatusEl.style.color = '#ffaa00';
+                });
+
+                // 重新连接成功
+                socket.on('reconnect', (attempt) => {
+                    console.log(`重新连接成功 (${attempt})`);
+                    wsStatusEl.textContent = '已连接';
+                    wsStatusEl.style.color = '#4cc9f0';
+                    addMessage('系统', 'Socket.IO 重新连接成功', 'assistant');
+                });
+
+                // 监听服务器发送的聊天响应
+                socket.on('mcp_response', (data) => {
+                    if (data.error) {
+                        addMessage('系统', `错误: ${data.error.message}`, 'assistant');
+                        return;
+                    }
+                    console.log(data)
+                    if (data.sessionId && data.sessionId !== currentSessionId) {
+                        currentSessionId = data.sessionId;
+                        sessionIdEl.textContent = currentSessionId;
+                    }
+
+                    if (data.content) {
+                        appendToLastMessage(data.content);
+                    }
+
+                    if (data.complete) {
+                        hideTypingIndicator();
+                    }
+                });
+
+                // 监听服务器发送的错误
+                socket.on('mcp_error', (error) => {
+                    addMessage('系统', `服务器错误: ${error.message}`, 'assistant');
+                    hideTypingIndicator();
+                });
+            }
+
+            // 添加消息到聊天窗口
+            function addMessage(sender, content, type) {
+                const messageEl = document.createElement('div');
+                messageEl.classList.add('message', `${type}-message`);
+                messageEl.innerHTML = `<strong>${sender}:</strong> ${content}`;
+                chatMessagesEl.appendChild(messageEl);
+                chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+                return messageEl;
+            }
+
+            // 追加到最后一条消息
+            function appendToLastMessage(content) {
+                const lastMessage = chatMessagesEl.lastChild;
+                if (lastMessage && lastMessage.classList.contains('assistant-message')) {
+                    lastMessage.innerHTML += content;
+                    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+                } else {
+                    addMessage('助手', content, 'assistant');
+                }
+            }
+
+            // 显示输入指示器
+            function showTypingIndicator() {
+                typingIndicatorEl.style.display = 'block';
+                chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+            }
+
+            // 隐藏输入指示器
+            function hideTypingIndicator() {
+                typingIndicatorEl.style.display = 'none';
+            }
+
+            // 发送消息
+            function sendMessage() {
+                const message = messageInputEl.value.trim();
+                if (!message) return;
+                console.log(123, currentSessionId)
+                // 如果没有会话，创建一个
+                if (!currentSessionId) {
+                    createNewSession();
+                    return; // 创建新会话后会重新发送消息
+                }
+                console.log(346)
+
+                // 添加用户消息
+                addMessage('你', message, 'user');
+
+                // 显示输入指示器
+                showTypingIndicator();
+
+                // 获取上下文
+                let context = {};
+                try {
+                    context = contextInputEl.value ? JSON.parse(contextInputEl.value) : {};
+                } catch (e) {
+                    console.error('Invalid context JSON:', e);
+                    addMessage('系统', '上下文格式无效，使用默认上下文', 'assistant');
+                }
+
+                // 通过 Socket.IO 发送消息
+                socket.emit('mcp_chat', {
+                    sessionId: currentSessionId,
+                    message: message,
+                    context: context
+                });
+
+                // 清空输入框
+                messageInputEl.value = '';
+            }
+
+            // 创建新会话
+            function createNewSession() {
+                // 获取上下文
+                let context = {};
+                try {
+                    context = contextInputEl.value ? JSON.parse(contextInputEl.value) : {};
+                } catch (e) {
+                    console.error('Invalid context JSON:', e);
+                    addMessage('系统', '上下文格式无效，使用默认上下文', 'assistant');
+                }
+
+                // 通过 Socket.IO 创建新会话
+                socket.emit('new_session', { context }, (response) => {
+                    if (response.error) {
+                        addMessage('系统', `创建会话失败: ${response.error.message}`, 'assistant');
+                        return;
+                    }
+
+                    currentSessionId = response.sessionId;
+                    sessionIdEl.textContent = currentSessionId;
+                    chatMessagesEl.innerHTML = '';
+                    addMessage('助手', '新的会话已创建。请开始对话！', 'assistant');
+
+                    // 如果有待发送的消息，现在发送
+                    const message = messageInputEl.value.trim();
+                    if (message) {
+                        addMessage('你', message, 'user');
+                        showTypingIndicator();
+                        socket.emit('mcp_chat', {
+                            sessionId: currentSessionId,
+                            message: message,
+                            context: context
+                        });
+                        messageInputEl.value = '';
+                    }
+                });
+            }
+
+            // 清除当前会话
+            function clearCurrentSession() {
+                if (currentSessionId) {
+                    socket.emit('clear_session', { sessionId: currentSessionId }, (response) => {
+                        if (response.success) {
+                            chatMessagesEl.innerHTML = '';
+                            addMessage('助手', '会话已重置。请开始新的对话！', 'assistant');
+                        } else {
+                            addMessage('系统', `清除会话失败: ${response.error || '未知错误'}`, 'assistant');
+                        }
+                    });
+                }
+            }
+
+            // 更新上下文
+            function updateContext() {
+                if (!currentSessionId) return;
+
+                let context = {};
+                try {
+                    context = contextInputEl.value ? JSON.parse(contextInputEl.value) : { "language": "zh-CN", "tone": "professional" };
+                } catch (e) {
+                    console.error('Invalid context JSON:', e);
+                    addMessage('系统', '上下文格式无效', 'assistant');
+                    return;
+                }
+
+                socket.emit('update_context', {
+                    sessionId: currentSessionId,
+                    context: context
+                }, (response) => {
+                    if (response.success) {
+                        addMessage('系统', `上下文已更新: ${JSON.stringify(context)}`, 'assistant');
+                    } else {
+                        addMessage('系统', `更新上下文失败: ${response.error || '未知错误'}`, 'assistant');
+                    }
+                });
+            }
+
+            // 初始化 Socket.IO 连接
+            initSocketIO();
+
+            // 事件监听器
+            sendMessageBtn.addEventListener('click', sendMessage);
+            messageInputEl.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendMessage();
+            });
+
+            newSessionBtn.addEventListener('click', createNewSession);
+            clearSessionBtn.addEventListener('click', clearCurrentSession);
+            updateContextBtn.addEventListener('click', updateContext);
+
+            // 添加状态指示器
+            const stateIndicator = document.createElement('div');
+            stateIndicator.id = 'stateIndicator';
+            stateIndicator.style.cssText = `
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: gray;
+      z-index: 1000;
+    `;
+            document.body.appendChild(stateIndicator);
+
+            // 更新连接状态指示器
+            function updateConnectionState() {
+                if (!socket) return;
+
+                const stateIndicator = document.getElementById('stateIndicator');
+
+                switch (socket.connected) {
+                    case true:
+                        stateIndicator.style.background = '#4cc9f0'; // 蓝色 - 已连接
+                        break;
+                    case false:
+                        stateIndicator.style.background = '#f72585'; // 红色 - 断开连接
+                        break;
+                    default:
+                        stateIndicator.style.background = 'gray'; // 灰色 - 未知状态
+                }
+            }
+
+            // 每秒钟更新一次状态
+            setInterval(updateConnectionState, 1000);
+            updateConnectionState();
+        });
+    </script>
+</body>
+
+</html>
