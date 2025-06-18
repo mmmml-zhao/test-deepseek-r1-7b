@@ -1,5 +1,5 @@
 # AI Talk Page Using MCP Protocol
-
+使用 ollama 在本地运行一个 deepseek-r1:7b的模型，使用node编写MCP服务，供页面调用大模型。
 
 ```mermaid
 flowchart TD
