@@ -25,6 +25,61 @@ app.get('/', (req, res) => {
     res.sendFile(process.cwd() + '/index.html');
 });
 
+// RAG相关API端点
+app.post('/api/rag/add-documents', async (req, res) => {
+    try {
+        const { documentsPath } = req.body;
+
+        if (!documentsPath) {
+            return res.status(400).json({ error: '缺少文档路径参数' });
+        }
+
+        const result = await llmAdapter.addDocuments(documentsPath);
+        res.json({ success: true, result });
+    } catch (error) {
+        console.error('添加文档失败:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/rag/stats', async (req, res) => {
+    try {
+        const stats = await llmAdapter.getKnowledgeBaseStats();
+        res.json({ success: true, stats });
+    } catch (error) {
+        console.error('获取统计信息失败:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/rag/clear', async (req, res) => {
+    try {
+        await llmAdapter.clearKnowledgeBase();
+        res.json({ success: true, message: '知识库已清空' });
+    } catch (error) {
+        console.error('清空知识库失败:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/rag/toggle', (req, res) => {
+    try {
+        const { enabled } = req.body;
+        llmAdapter.setRAGEnabled(enabled);
+        res.json({ success: true, ragEnabled: enabled });
+    } catch (error) {
+        console.error('切换RAG状态失败:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/rag/status', (req, res) => {
+    res.json({
+        success: true,
+        ragEnabled: llmAdapter.ragEnabled
+    });
+});
+
 // 添加引擎级日志
 io.engine.on("connection", (socket) => {
     console.log(`引擎连接: ${socket.id}`);
@@ -79,6 +134,55 @@ io.on('connection', (socket) => {
             console.error('更新上下文失败:', error);
             callback({ success: false, error: MCPProtocol.formatError(error) });
         }
+    });
+
+    // RAG相关Socket事件
+    socket.on('rag_add_documents', async ({ documentsPath }, callback) => {
+        try {
+            console.log('rag_add_documents', documentsPath)
+            const result = await llmAdapter.addDocuments(documentsPath);
+            callback({ success: true, result });
+        } catch (error) {
+            console.error('添加文档失败:', error);
+            callback({ success: false, error: error.message });
+        }
+    });
+
+    socket.on('rag_get_stats', async (callback) => {
+        try {
+            const stats = await llmAdapter.getKnowledgeBaseStats();
+            callback({ success: true, stats });
+        } catch (error) {
+            console.error('获取统计信息失败:', error);
+            callback({ success: false, error: error.message });
+        }
+    });
+
+    socket.on('rag_clear', async (callback) => {
+        try {
+            await llmAdapter.clearKnowledgeBase();
+            callback({ success: true, message: '知识库已清空' });
+        } catch (error) {
+            console.error('清空知识库失败:', error);
+            callback({ success: false, error: error.message });
+        }
+    });
+
+    socket.on('rag_toggle', ({ enabled }, callback) => {
+        try {
+            llmAdapter.setRAGEnabled(enabled);
+            callback({ success: true, ragEnabled: enabled });
+        } catch (error) {
+            console.error('切换RAG状态失败:', error);
+            callback({ success: false, error: error.message });
+        }
+    });
+
+    socket.on('rag_status', (callback) => {
+        callback({
+            success: true,
+            ragEnabled: llmAdapter.ragEnabled
+        });
     });
 
     // 处理聊天消息

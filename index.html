@@ -12,10 +12,40 @@
     <div class="container">
         <header>
             <h1>MCP协议服务</h1>
-            <p class="subtitle">大模型上下文协议实现 - Node.js后端</p>
+            <p class="subtitle">大模型上下文协议实现 - Node.js后端 + RAG功能</p>
         </header>
 
         <div class="main-content">
+            <!-- RAG控制面板 -->
+            <div class="card rag-panel">
+                <h2>RAG知识库管理</h2>
+            
+                <div class="rag-controls">
+                    <div class="rag-status">
+                        <label>RAG状态: <span id="ragStatus">检查中...</span></label>
+                        <button id="toggleRagBtn" class="btn btn-small">切换</button>
+                    </div>
+            
+                    <div class="rag-stats">
+                        <p>知识库文档数: <span id="ragDocCount">-</span></p>
+                    </div>
+                </div>
+            
+                <div class="document-upload">
+                    <h3>添加文档</h3>
+                    <div class="upload-section">
+                        <input type="text" id="documentsPath" placeholder="输入文档路径 (如: /path/to/documents)" class="input-field">
+                        <button id="addDocumentsBtn" class="btn">添加文档</button>
+                    </div>
+                    <p class="help-text">支持的文件类型: .txt, .md, .js, .ts, .py, .java, .cpp, .c, .h, .json, .xml, .html, .css</p>
+                </div>
+            
+                <div class="rag-actions">
+                    <button id="getRagStatsBtn" class="btn btn-small">刷新统计</button>
+                    <button id="clearRagBtn" class="btn btn-small btn-warning">清空知识库</button>
+                </div>
+            </div>
+
             <div class="card control-panel">
                 <h2>会话控制</h2>
 
@@ -31,7 +61,7 @@
 
                 <div class="context-editor">
                     <h3>上下文设置</h3>
-                    <textarea id="contextInput" placeholder='{"language": "zh-CN", "tone": "professional"}'></textarea>
+                    <textarea id="contextInput" placeholder='{"language": "zh-CN", "tone": "professional", "useRAG": true}'></textarea>
                     <button id="updateContextBtn" class="btn">更新上下文</button>
                 </div>
 
@@ -47,7 +77,7 @@
                 <div class="chat-container">
                     <div class="chat-messages" id="chatMessages">
                         <div class="message assistant-message">
-                            欢迎使用MCP协议服务！请开始对话或创建一个新的会话。
+                            欢迎使用MCP协议服务！现在支持RAG功能，您可以添加文档到知识库，AI将基于这些文档回答您的问题。
                         </div>
                     </div>
 
@@ -69,16 +99,25 @@
 
         <div class="card protocol-info">
             <h2>MCP协议详情</h2>
-            <p>MCP(大模型上下文协议)是一种用于管理和维护与大模型交互的上下文状态的标准协议。</p>
+            <p>MCP(大模型上下文协议)是一种用于管理和维护与大模型交互的上下文状态的标准协议。现在集成了RAG(检索增强生成)功能。</p>
 
             <div class="protocol-details">
+                <h3>RAG功能说明</h3>
+                <ul>
+                    <li><strong>文档处理:</strong> 支持多种文件格式，自动分割和向量化</li>
+                    <li><strong>语义搜索:</strong> 基于用户问题检索相关文档片段</li>
+                    <li><strong>增强回答:</strong> 结合检索到的文档信息生成更准确的回答</li>
+                    <li><strong>知识库管理:</strong> 支持添加、查看统计和清空知识库</li>
+                </ul>
+
                 <p>请求示例:</p>
                 <pre>{
   "session_id": "sess_123456",
   "message": "解释量子计算",
   "context": {
     "language": "zh-CN",
-    "tone": "professional"
+    "tone": "professional",
+    "useRAG": true
   }
 }</pre>
 
@@ -90,7 +129,7 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
         </div>
 
         <footer>
-            <p>MCP协议服务 &copy; 2023 | 基于Node.js和Redis实现</p>
+            <p>MCP协议服务 &copy; 2023 | 基于Node.js、Redis和RAG技术实现</p>
         </footer>
     </div>
     <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
@@ -109,8 +148,44 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
             const wsStatusEl = document.getElementById('wsStatus');
             const typingIndicatorEl = document.getElementById('typingIndicator');
 
+            // RAG相关元素
+            const ragStatusEl = document.getElementById('ragStatus');
+            const toggleRagBtn = document.getElementById('toggleRagBtn');
+            const ragDocCountEl = document.getElementById('ragDocCount');
+            const documentsPathEl = document.getElementById('documentsPath');
+            const addDocumentsBtn = document.getElementById('addDocumentsBtn');
+            const getRagStatsBtn = document.getElementById('getRagStatsBtn');
+            const clearRagBtn = document.getElementById('clearRagBtn');
+
             let currentSessionId = null;
             let socket = null;
+            let ragEnabled = false;
+
+            // 从本地存储恢复会话ID
+            function restoreSessionId() {
+                const savedSessionId = localStorage.getItem('mcp_session_id');
+                if (savedSessionId) {
+                    currentSessionId = savedSessionId;
+                    sessionIdEl.textContent = currentSessionId;
+                    console.log('已恢复会话ID:', currentSessionId);
+                }
+            }
+
+            // 保存会话ID到本地存储
+            function saveSessionId(sessionId) {
+                currentSessionId = sessionId;
+                localStorage.setItem('mcp_session_id', sessionId);
+                sessionIdEl.textContent = sessionId;
+                console.log('已保存会话ID:', sessionId);
+            }
+
+            // 清除本地存储的会话ID
+            function clearSavedSessionId() {
+                localStorage.removeItem('mcp_session_id');
+                currentSessionId = null;
+                sessionIdEl.textContent = '未创建';
+                console.log('已清除会话ID');
+            }
 
             // 初始化 Socket.IO 连接
             function initSocketIO() {
@@ -134,6 +209,10 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
                     wsStatusEl.textContent = '已连接';
                     wsStatusEl.style.color = '#4cc9f0';
                     addMessage('系统', 'Socket.IO 连接已建立', 'assistant');
+
+                    // 获取RAG状态
+                    getRagStatus();
+                    getRagStats();
                 });
 
                 // 连接错误
@@ -180,6 +259,10 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
                     wsStatusEl.textContent = '已连接';
                     wsStatusEl.style.color = '#4cc9f0';
                     addMessage('系统', 'Socket.IO 重新连接成功', 'assistant');
+
+                    // 重新获取RAG状态
+                    getRagStatus();
+                    getRagStats();
                 });
 
                 // 监听服务器发送的聊天响应
@@ -190,8 +273,7 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
                     }
                     console.log(data)
                     if (data.sessionId && data.sessionId !== currentSessionId) {
-                        currentSessionId = data.sessionId;
-                        sessionIdEl.textContent = currentSessionId;
+                        saveSessionId(data.sessionId);
                     }
 
                     if (data.content) {
@@ -208,6 +290,76 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
                     addMessage('系统', `服务器错误: ${error.message}`, 'assistant');
                     hideTypingIndicator();
                 });
+            }
+
+            // RAG相关函数
+            function getRagStatus() {
+                socket.emit('rag_status', (response) => {
+                    if (response.success) {
+                        ragEnabled = response.ragEnabled;
+                        updateRagStatusDisplay();
+                    }
+                });
+            }
+
+            function getRagStats() {
+                socket.emit('rag_get_stats', (response) => {
+                    if (response.success) {
+                        ragDocCountEl.textContent = response.stats.totalDocuments || 0;
+                    } else {
+                        ragDocCountEl.textContent = '获取失败';
+                    }
+                });
+            }
+
+            function updateRagStatusDisplay() {
+                ragStatusEl.textContent = ragEnabled ? '已启用' : '已禁用';
+                ragStatusEl.style.color = ragEnabled ? '#4cc9f0' : '#f72585';
+                toggleRagBtn.textContent = ragEnabled ? '禁用' : '启用';
+            }
+
+            function addDocuments() {
+                const documentsPath = documentsPathEl.value.trim();
+                if (!documentsPath) {
+                    addMessage('系统', '请输入文档路径', 'assistant');
+                    return;
+                }
+
+                addMessage('系统', `正在添加文档: ${documentsPath}...`, 'assistant');
+
+                socket.emit('rag_add_documents', { documentsPath }, (response) => {
+                    if (response.success) {
+                        addMessage('系统', `文档添加成功！处理了 ${response.result.documentsProcessed} 个文档，生成了 ${response.result.chunksCreated} 个文本块。`, 'assistant');
+                        getRagStats(); // 刷新统计
+                    } else {
+                        addMessage('系统', `添加文档失败: ${response.error}`, 'assistant');
+                    }
+                });
+            }
+
+            function toggleRag() {
+                socket.emit('rag_toggle', { enabled: !ragEnabled }, (response) => {
+                    if (response.success) {
+                        ragEnabled = response.ragEnabled;
+                        updateRagStatusDisplay();
+                        addMessage('系统', `RAG功能已${ragEnabled ? '启用' : '禁用'}`, 'assistant');
+                    } else {
+                        addMessage('系统', `切换RAG状态失败: ${response.error}`, 'assistant');
+                    }
+                });
+            }
+
+            function clearRag() {
+                if (confirm('确定要清空知识库吗？此操作不可恢复。')) {
+                    socket.emit('rag_clear', (response) => {
+                        if (response.success) {
+                            addMessage('系统', '知识库已清空', 'assistant');
+                            getRagStats(); // 刷新统计
+                        } else {
+                            addMessage('系统', `清空知识库失败: ${response.error}`, 'assistant');
+                        }
+                    });
+                }
             }
 
             // 添加消息到聊天窗口
@@ -269,6 +421,11 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
                     addMessage('系统', '上下文格式无效，使用默认上下文', 'assistant');
                 }
 
+                // 确保RAG设置正确
+                if (ragEnabled) {
+                    context.useRAG = true;
+                }
+
                 // 通过 Socket.IO 发送消息
                 socket.emit('mcp_chat', {
                     sessionId: currentSessionId,
@@ -291,6 +448,11 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
                     addMessage('系统', '上下文格式无效，使用默认上下文', 'assistant');
                 }
 
+                // 确保RAG设置正确
+                if (ragEnabled) {
+                    context.useRAG = true;
+                }
+
                 // 通过 Socket.IO 创建新会话
                 socket.emit('new_session', { context }, (response) => {
                     if (response.error) {
@@ -298,8 +460,7 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
                         return;
                     }
 
-                    currentSessionId = response.sessionId;
-                    sessionIdEl.textContent = currentSessionId;
+                    saveSessionId(response.sessionId);
                     chatMessagesEl.innerHTML = '';
                     addMessage('助手', '新的会话已创建。请开始对话！', 'assistant');
 
@@ -323,6 +484,7 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
                 if (currentSessionId) {
                     socket.emit('clear_session', { sessionId: currentSessionId }, (response) => {
                         if (response.success) {
+                            clearSavedSessionId();
                             chatMessagesEl.innerHTML = '';
                             addMessage('助手', '会话已重置。请开始新的对话！', 'assistant');
                         } else {
@@ -345,6 +507,11 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
                     return;
                 }
 
+                // 确保RAG设置正确
+                if (ragEnabled) {
+                    context.useRAG = true;
+                }
+
                 socket.emit('update_context', {
                     sessionId: currentSessionId,
                     context: context
@@ -360,6 +527,9 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
             // 初始化 Socket.IO 连接
             initSocketIO();
 
+            // 恢复会话ID
+            restoreSessionId();
+
             // 事件监听器
             sendMessageBtn.addEventListener('click', sendMessage);
             messageInputEl.addEventListener('keypress', (e) => {
@@ -369,6 +539,12 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
             newSessionBtn.addEventListener('click', createNewSession);
             clearSessionBtn.addEventListener('click', clearCurrentSession);
             updateContextBtn.addEventListener('click', updateContext);
+
+            // RAG事件监听器
+            addDocumentsBtn.addEventListener('click', addDocuments);
+            toggleRagBtn.addEventListener('click', toggleRag);
+            getRagStatsBtn.addEventListener('click', getRagStats);
+            clearRagBtn.addEventListener('click', clearRag);
 
             // 添加状态指示器
             const stateIndicator = document.createElement('div');
