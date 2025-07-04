@@ -251,8 +251,8 @@ class VectorStoreOptimized {
     async getStats() {
         try {
             await this.initialize();
-
             const count = await this.collection.count();
+
             return {
                 totalDocuments: count,
                 collectionName: this.collectionName

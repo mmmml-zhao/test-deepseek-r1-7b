@@ -1,11 +1,13 @@
 import VectorStoreOptimized from './vector_store_optimized.js';
 import DocumentProcessor from './document_processor.js';
+import RerankerManager from './reranker_manager.js';
 import { PathUtils, LogUtils } from './utils.js';
 
 class RAGManagerOptimized {
-    constructor() {
+    constructor(config = {}) {
         this.vectorStore = new VectorStoreOptimized();
         this.documentProcessor = new DocumentProcessor();
+        this.reranker = new RerankerManager(config.reranker);
     }
 
     /**
@@ -59,14 +61,19 @@ class RAGManagerOptimized {
             // 搜索相关文档
             const relevantDocs = await this.vectorStore.search(query, topK);
 
+            // 使用重排序模型重新排序文档
+            const rerankedDocs = await this.reranker.rerank(query, relevantDocs);
+
             // 构建增强提示
-            const enhancedPrompt = this.buildEnhancedPrompt(query, relevantDocs);
+            const enhancedPrompt = this.buildEnhancedPrompt(query, rerankedDocs);
 
             return {
                 query,
-                relevantDocuments: relevantDocs,
+                relevantDocuments: rerankedDocs,
+                originalDocuments: relevantDocs,
                 enhancedPrompt,
-                documentCount: relevantDocs.length
+                documentCount: rerankedDocs.length,
+                rerankingApplied: rerankedDocs.length > 0 && rerankedDocs[0].rerankScore !== undefined
             };
         } catch (error) {
             LogUtils.error('RAG查询失败', error);
@@ -104,7 +111,16 @@ class RAGManagerOptimized {
      */
     async getStats() {
         try {
-            return await this.vectorStore.getStats();
+            const vectorStats = await this.vectorStore.getStats();
+            const processorStats = this.documentProcessor.getStats();
+            const rerankerStats = this.reranker.getStats();
+
+            return {
+                vectorStore: vectorStats,
+                documentProcessor: processorStats,
+                reranker: rerankerStats,
+                timestamp: new Date().toISOString()
+            };
         } catch (error) {
             LogUtils.error('获取统计信息失败', error);
             throw error;

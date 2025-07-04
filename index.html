@@ -305,7 +305,7 @@ data: {"content": "量子力学原理的计算方式", ...}</pre>
             function getRagStats() {
                 socket.emit('rag_get_stats', (response) => {
                     if (response.success) {
-                        ragDocCountEl.textContent = response.stats.totalDocuments || 0;
+                        ragDocCountEl.textContent = response.stats.vectorStore.totalDocuments || 0;
                     } else {
                         ragDocCountEl.textContent = '获取失败';
                     }

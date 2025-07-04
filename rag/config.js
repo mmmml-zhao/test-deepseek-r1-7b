@@ -20,6 +20,17 @@ export const RAG_CONFIG = {
             model: 'dengcao/Qwen3-Embedding-4B:Q4_K_M',
             baseUrl: process.env.OLLAMA_API_BASE || 'http://localhost:11434',
             dimension: 2560  // Qwen3-Embedding-4B 量化版本的维度
+        },
+
+        // 重排序模型配置
+        reranker: {
+            model: 'dengcao/Qwen3-Reranker-4B:Q4_K_M',
+            baseUrl: process.env.OLLAMA_API_BASE || 'http://localhost:11434',
+            temperature: 0,
+            enableReranking: true,
+            maxRetries: 2,
+            timeout: 30000,
+            batchSize: 10
         }
     },
 

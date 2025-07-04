@@ -1,6 +1,7 @@
 // mcp/llm_adapter.js
 import fetch from 'node-fetch';
 import RAGManagerOptimized from '../rag/rag_manager_optimized.js';
+import config from '../rag/config.js';
 
 // Ollama API 配置
 const OLLAMA_API_BASE = process.env.OLLAMA_API_BASE || 'http://localhost:11434';
@@ -8,7 +9,7 @@ const DEFAULT_MODEL = process.env.OLLAMA_MODEL || 'deepseek-r1:7b';
 
 class OllamaAdapter {
     constructor() {
-        this.ragManager = new RAGManagerOptimized();
+        this.ragManager = new RAGManagerOptimized(config);
         this.ragEnabled = true; // 默认启用RAG
     }
 

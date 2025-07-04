@@ -170,6 +170,19 @@ class DocumentProcessor {
 
         return chunks;
     }
+
+    /**
+     * 获取文档处理器统计信息
+     * @returns {Object} - 统计信息
+     */
+    getStats() {
+        return {
+            supportedExtensions: this.supportedExtensions,
+            supportedTypes: this.supportedExtensions.map(ext => this.getFileType(ext)),
+            processorType: 'DocumentProcessor',
+            version: '1.0.0'
+        };
+    }
 }
 
 export default DocumentProcessor; 
